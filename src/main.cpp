@@ -19,6 +19,7 @@
 #define BRIGHTNESS        64        // 0–255
 #define ONBOARD_LED_PIN   48        // RGB WS2812B on GPIO 48 (ESP32-S3 DevKitC)
 #define BLINK_INTERVAL_MS 500
+#define HEAT_MAX          10        // submission count that reaches peak "hot" red
 
 // Access Point credentials
 static const char* AP_SSID     = "MapExplorer";
@@ -39,19 +40,62 @@ struct State {
     const char* name;
     uint8_t     ledFirst;        // first LED index in the map strip (inclusive)
     uint8_t     ledLast;         // last  LED index in the map strip (inclusive)
-    CRGB        defaultColor;    // shown on startup
-    CRGB        visitedColor;    // shown after at least one submission
-    bool        visited;
+    CRGB        idleColor;       // shown when count == 0
+    uint16_t    count;           // number of submissions from this state
 };
 
 static State states[] = {
-    // { "StateName", ledFirst, ledLast, defaultColor, visitedColor, false }
-    { "California",  0,  2, CRGB::Gold, CRGB::Green, false },
-    { "Oregon",      3,  4, CRGB::Gold, CRGB::Green, false },
-    { "Washington",  5,  6, CRGB::Gold, CRGB::Green, false },
-    { "Nevada",      7,  8, CRGB::Gold, CRGB::Green, false },
-    { "Arizona",     9, 10, CRGB::Gold, CRGB::Green, false },
-    // ... add remaining states here
+    // { "StateName", ledFirst, ledLast, idleColor, count }
+    { "Alabama",         0,  1, CRGB::DimGray, 0 },
+    { "Alaska",          2,  3, CRGB::DimGray, 0 },
+    { "Arizona",         4,  5, CRGB::DimGray, 0 },
+    { "Arkansas",        6,  7, CRGB::DimGray, 0 },
+    { "California",      8,  9, CRGB::DimGray, 0 },
+    { "Colorado",       10, 11, CRGB::DimGray, 0 },
+    { "Connecticut",    12, 13, CRGB::DimGray, 0 },
+    { "Delaware",       14, 15, CRGB::DimGray, 0 },
+    { "Florida",        16, 17, CRGB::DimGray, 0 },
+    { "Georgia",        18, 19, CRGB::DimGray, 0 },
+    { "Hawaii",         20, 21, CRGB::DimGray, 0 },
+    { "Idaho",          22, 23, CRGB::DimGray, 0 },
+    { "Illinois",       24, 25, CRGB::DimGray, 0 },
+    { "Indiana",        26, 27, CRGB::DimGray, 0 },
+    { "Iowa",           28, 29, CRGB::DimGray, 0 },
+    { "Kansas",         30, 31, CRGB::DimGray, 0 },
+    { "Kentucky",       32, 33, CRGB::DimGray, 0 },
+    { "Louisiana",      34, 35, CRGB::DimGray, 0 },
+    { "Maine",          36, 37, CRGB::DimGray, 0 },
+    { "Maryland",       38, 39, CRGB::DimGray, 0 },
+    { "Massachusetts",  40, 41, CRGB::DimGray, 0 },
+    { "Michigan",       42, 43, CRGB::DimGray, 0 },
+    { "Minnesota",      44, 45, CRGB::DimGray, 0 },
+    { "Mississippi",    46, 47, CRGB::DimGray, 0 },
+    { "Missouri",       48, 49, CRGB::DimGray, 0 },
+    { "Montana",        50, 51, CRGB::DimGray, 0 },
+    { "Nebraska",       52, 53, CRGB::DimGray, 0 },
+    { "Nevada",         54, 55, CRGB::DimGray, 0 },
+    { "New Hampshire",  56, 57, CRGB::DimGray, 0 },
+    { "New Jersey",     58, 59, CRGB::DimGray, 0 },
+    { "New Mexico",     60, 61, CRGB::DimGray, 0 },
+    { "New York",       62, 63, CRGB::DimGray, 0 },
+    { "North Carolina", 64, 65, CRGB::DimGray, 0 },
+    { "North Dakota",   66, 67, CRGB::DimGray, 0 },
+    { "Ohio",           68, 69, CRGB::DimGray, 0 },
+    { "Oklahoma",       70, 71, CRGB::DimGray, 0 },
+    { "Oregon",         72, 73, CRGB::DimGray, 0 },
+    { "Pennsylvania",   74, 75, CRGB::DimGray, 0 },
+    { "Rhode Island",   76, 77, CRGB::DimGray, 0 },
+    { "South Carolina", 78, 79, CRGB::DimGray, 0 },
+    { "South Dakota",   80, 81, CRGB::DimGray, 0 },
+    { "Tennessee",      82, 83, CRGB::DimGray, 0 },
+    { "Texas",          84, 85, CRGB::DimGray, 0 },
+    { "Utah",           86, 87, CRGB::DimGray, 0 },
+    { "Vermont",        88, 89, CRGB::DimGray, 0 },
+    { "Virginia",       90, 91, CRGB::DimGray, 0 },
+    { "Washington",     92, 93, CRGB::DimGray, 0 },
+    { "West Virginia",  94, 95, CRGB::DimGray, 0 },
+    { "Wisconsin",      96, 97, CRGB::DimGray, 0 },
+    { "Wyoming",        98, 99, CRGB::DimGray, 0 },
 };
 
 static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
@@ -69,8 +113,12 @@ static uint16_t   submissionCount = 0;
 static uint8_t seenMACs[MAX_SUBMISSIONS][6];
 static uint16_t seenMACCount = 0;
 
-// Set to true by the web handler; consumed in loop() to trigger the flash.
-static volatile bool newSubmission = false;
+// Set by the web handler; consumed in loop() to trigger animations.
+static volatile bool    newSubmission    = false;
+static volatile int16_t newSubmissionIdx = -1;   // states[] index, or -1 if no match
+
+// Index of the state with the highest submission count (-1 if all zero).
+static int16_t leadingStateIdx = -1;
 
 // ── Web server & DNS ──────────────────────────────────────────────────────────
 AsyncWebServer server(80);
@@ -78,11 +126,40 @@ DNSServer      dnsServer;
 
 // ── LED helpers ───────────────────────────────────────────────────────────────
 
-// Redraw all map LEDs from current state (visited or not).
+// Maps a submission count to a heatmap color.
+// 0            → idleColor (caller's responsibility)
+// 1            → blue (cool)
+// HEAT_MAX / 2 → green / yellow (warm)
+// HEAT_MAX+    → red (hot), clamped
+//
+// Gradient stops: blue → cyan → green → yellow → red
+CRGB heatmapColor(uint16_t count) {
+    if (count == 0) return CRGB::Black; // caller substitutes idleColor
+
+    // Clamp to [1, HEAT_MAX] then map to 0–255
+    uint16_t clamped = count > HEAT_MAX ? HEAT_MAX : count;
+    uint8_t  t       = (uint8_t)((uint32_t)(clamped - 1) * 255 / (HEAT_MAX - 1));
+
+    // Four equal segments across five stops
+    static const CRGB stops[5] = {
+        CRGB(  0,   0, 255),   // blue
+        CRGB(  0, 255, 255),   // cyan
+        CRGB(  0, 255,   0),   // green
+        CRGB(255, 255,   0),   // yellow
+        CRGB(255,   0,   0),   // red
+    };
+    uint8_t seg  = t / 64;             // 0–3
+    uint8_t frac = (t % 64) * 4;      // 0–255 within segment
+    if (seg >= 4) return stops[4];
+    return blend(stops[seg], stops[seg + 1], frac);
+}
+
+// Redraw all map LEDs from current counts.
 void refreshLEDs() {
     fill_solid(leds, NUM_LEDS, CRGB::Black);
     for (uint8_t i = 0; i < NUM_STATES; i++) {
-        CRGB color = states[i].visited ? states[i].visitedColor : states[i].defaultColor;
+        CRGB color = (states[i].count == 0) ? states[i].idleColor
+                                             : heatmapColor(states[i].count);
         for (uint8_t j = states[i].ledFirst; j <= states[i].ledLast; j++) {
             leds[j] = color;
         }
@@ -98,14 +175,29 @@ int findState(const char* name) {
     return -1;
 }
 
-// Mark a state visited and update the strip immediately.
-void markStateVisited(int idx) {
+// Returns the index of the state with the highest count (>0), or -1 if all zero.
+int16_t findLeadingState() {
+    int16_t  best      = -1;
+    uint16_t bestCount = 0;
+    for (uint8_t i = 0; i < NUM_STATES; i++) {
+        if (states[i].count > bestCount) {
+            bestCount = states[i].count;
+            best      = i;
+        }
+    }
+    return best;
+}
+
+// Increment a state's submission count and update its LEDs immediately.
+void incrementState(int idx) {
     if (idx < 0 || idx >= NUM_STATES) return;
-    states[idx].visited = true;
+    states[idx].count++;
+    CRGB color = heatmapColor(states[idx].count);
     for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++) {
-        leds[j] = states[idx].visitedColor;
+        leds[j] = color;
     }
     FastLED.show();
+    leadingStateIdx = findLeadingState();
 }
 
 // ── MAC address helpers ───────────────────────────────────────────────────────
@@ -184,9 +276,10 @@ void setupServer() {
 
         // Update the LED if this state is on the map
         int idx = findState(state.c_str());
-        if (idx >= 0) markStateVisited(idx);
+        if (idx >= 0) incrementState(idx);
 
-        newSubmission = true;
+        newSubmissionIdx = idx;
+        newSubmission    = true;
 
         Serial.printf("Submission #%d — state: %s, country: %s\n",
                       submissionCount, state.c_str(), country.c_str());
@@ -204,8 +297,9 @@ void setupServer() {
         submissionCount = 0;
         seenMACCount    = 0;
         for (uint8_t i = 0; i < NUM_STATES; i++) {
-            states[i].visited = false;
+            states[i].count = 0;
         }
+        leadingStateIdx = -1;
         refreshLEDs();
         req->send(200, "application/json", "{\"ok\":true}");
     });
@@ -304,20 +398,55 @@ void setup() {
 void loop() {
     dnsServer.processNextRequest();
 
-    // On a new submission: flash green 3 times, then resume heartbeat.
+    // ── New submission: blink the state's LEDs + onboard LED green 3 times ──
     if (newSubmission) {
         newSubmission = false;
+        int16_t idx = newSubmissionIdx;
+        newSubmissionIdx = -1;
+
         for (uint8_t i = 0; i < 3; i++) {
+            // Green on
             onboardLed[0] = CRGB::Green;
+            if (idx >= 0) {
+                for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++)
+                    leds[j] = CRGB::Green;
+            }
             FastLED.show();
             delay(150);
+
+            // Green off
             onboardLed[0] = CRGB::Black;
+            if (idx >= 0) {
+                for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++)
+                    leds[j] = CRGB::Black;
+            }
             FastLED.show();
             delay(150);
         }
+
+        // Restore heatmap colors after blink
+        refreshLEDs();
     }
 
-    // Slow blue heartbeat
+    // ── Pulse the leading state ───────────────────────────────────────────────
+    // Uses sin8() to produce a smooth 0–255 sine wave, scaled to stay in the
+    // upper half of brightness so the color is always recognisable.
+    static uint32_t lastPulse = 0;
+    if (millis() - lastPulse >= 20) {   // ~50 fps
+        lastPulse = millis();
+        int16_t li = leadingStateIdx;
+        if (li >= 0 && states[li].count > 0) {
+            // sin8 input wraps every 256 counts; >> 3 gives ~2 s period
+            uint8_t level = 128 + scale8(sin8((uint8_t)(millis() >> 3)), 127);
+            CRGB    color = heatmapColor(states[li].count);
+            color.nscale8(level);
+            for (uint8_t j = states[li].ledFirst; j <= states[li].ledLast; j++)
+                leds[j] = color;
+            FastLED.show();
+        }
+    }
+
+    // ── Slow blue heartbeat on onboard LED ───────────────────────────────────
     static uint32_t lastBlink = 0;
     static bool     ledState  = false;
 
