@@ -25,7 +25,10 @@ static Preferences prefs;
 #define BRIGHTNESS        64        // 0–255
 #define STATUS_LED_PIN    2         // Built-in blue LED on ESP32-WROOM-32E
 #define BLINK_INTERVAL_MS 500
-#define HEAT_MAX          10        // submission count that reaches peak "hot" red
+#define HEAT_TOP_PCT      15        // % of total submissions that pegs peak "hot" red
+#define SHIMMER_COLOR     CRGB::White  // base color for banner shimmer
+#define SHIMMER_SPEED     3            // higher = faster shimmer
+#define SHIMMER_MIN_BRI   40           // minimum brightness (0–255); keeps LEDs from going dark
 
 // Access Point credentials
 static const char* AP_SSID     = "MapExplorer";
@@ -159,9 +162,13 @@ void saveCount(char prefix, uint8_t idx, uint16_t count);
 CRGB heatmapColor(uint16_t count) {
     if (count == 0) return CRGB::Black; // caller substitutes idleColor
 
-    // Clamp to [1, HEAT_MAX] then map to 0–255
-    uint16_t clamped = count > HEAT_MAX ? HEAT_MAX : count;
-    uint8_t  t       = (uint8_t)((uint32_t)(clamped - 1) * 255 / (HEAT_MAX - 1));
+    // Threshold = 15% of total submissions, minimum 1 to avoid divide-by-zero
+    uint16_t threshold = (uint16_t)(submissionCount * HEAT_TOP_PCT / 100);
+    if (threshold < 1) threshold = 1;
+
+    // Clamp to [1, threshold] then map to 0–255
+    uint16_t clamped = count > threshold ? threshold : count;
+    uint8_t  t       = (uint8_t)((uint32_t)(clamped - 1) * 255 / (threshold - 1 ? threshold - 1 : 1));
 
     // Four equal segments across five stops
     static const CRGB stops[5] = {
@@ -554,6 +561,9 @@ void loop() {
     static uint32_t lastPulse = 0;
     if (millis() - lastPulse >= 20) {   // ~50 fps
         lastPulse = millis();
+        bool dirty = false;
+
+        // Pulse the leading state/region
         State* le = leadingEntry;
         if (le && le->count > 0) {
             uint8_t level = 128 + scale8(sin8((uint8_t)(millis() >> 3)), 127);
@@ -561,8 +571,27 @@ void loop() {
             color.nscale8(level);
             for (uint8_t j = le->ledFirst; j <= le->ledLast; j++)
                 leds[j] = color;
-            FastLED.show();
+            dirty = true;
         }
+        if (dirty) FastLED.show();
+
+        // Shimmer the banners using Perlin noise — each LED gets a smooth
+        // organic brightness driven by its position and the current time.
+        uint16_t t = (uint16_t)(millis() / SHIMMER_SPEED);
+        for (uint8_t i = 0; i < NUM_LEDS_BANNER_TOP; i++) {
+            uint8_t bri = scale8(inoise8(i * 40, t), 255 - SHIMMER_MIN_BRI) + SHIMMER_MIN_BRI;
+            CRGB c = SHIMMER_COLOR;
+            c.nscale8(bri);
+            bannerTopLeds[i] = c;
+        }
+        for (uint8_t i = 0; i < NUM_LEDS_BANNER_BOT; i++) {
+            // Offset the noise by a large prime so top and bottom shimmer independently
+            uint8_t bri = scale8(inoise8(i * 40 + 10000, t), 255 - SHIMMER_MIN_BRI) + SHIMMER_MIN_BRI;
+            CRGB c = SHIMMER_COLOR;
+            c.nscale8(bri);
+            bannerBotLeds[i] = c;
+        }
+        FastLED.show();
     }
 
     // ── Slow blue heartbeat on onboard LED ───────────────────────────────────
