@@ -3,15 +3,21 @@
 #include <WiFi.h>
 #include <DNSServer.h>
 #include <ESPAsyncWebServer.h>
+#include <Preferences.h>
+#include <LittleFS.h>
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include "web_content.h"
+
+static Preferences prefs;
+#define PREFS_NS  "wookie"       // NVS namespace for counts
+#define SUBS_FILE "/subs.csv"    // LittleFS path for submission log
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 #define DATA_PIN              5     // map LED strip
 #define DATA_PIN_BANNER_TOP   6     // top banner LED strip
 #define DATA_PIN_BANNER_BOT   7     // bottom banner LED strip
-#define NUM_LEDS              100   // LEDs in the map strip
+#define NUM_LEDS              106   // 100 state LEDs (0–99) + 6 region LEDs (100–105)
 #define NUM_LEDS_BANNER_TOP   30    // LEDs in the top banner
 #define NUM_LEDS_BANNER_BOT   30    // LEDs in the bottom banner
 #define LED_TYPE          WS2812B
@@ -100,6 +106,21 @@ static State states[] = {
 
 static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
 
+// ── Region LEDs (individual LEDs, indices 100–105 on the map strip) ───────────
+// These share the same State struct and heatmap scheme as US states.
+// "country" form field value must match name exactly (case-insensitive).
+static State regions[] = {
+    // { "RegionName", ledIndex, ledIndex, idleColor, count }
+    { "Canada",    100, 100, CRGB::DimGray, 0 },
+    { "Mexico",    101, 101, CRGB::DimGray, 0 },
+    { "Europe",    102, 102, CRGB::DimGray, 0 },
+    { "Asia",      103, 103, CRGB::DimGray, 0 },
+    { "Africa",    104, 104, CRGB::DimGray, 0 },
+    { "Australia", 105, 105, CRGB::DimGray, 0 },
+};
+
+static const uint8_t NUM_REGIONS = sizeof(regions) / sizeof(regions[0]);
+
 // ── Submission storage ────────────────────────────────────────────────────────
 struct Submission {
     char state[64];
@@ -115,14 +136,17 @@ static uint16_t seenMACCount = 0;
 
 // Set by the web handler; consumed in loop() to trigger animations.
 static volatile bool    newSubmission    = false;
-static volatile int16_t newSubmissionIdx = -1;   // states[] index, or -1 if no match
+static volatile State*  newSubmissionEntry = nullptr; // points into states[] or regions[]
 
-// Index of the state with the highest submission count (-1 if all zero).
-static int16_t leadingStateIdx = -1;
+// Pointer to the state/region with the highest submission count (nullptr if all zero).
+static State* leadingEntry = nullptr;
 
 // ── Web server & DNS ──────────────────────────────────────────────────────────
 AsyncWebServer server(80);
 DNSServer      dnsServer;
+
+// Forward declaration — defined in the Persistence section below.
+void saveCount(char prefix, uint8_t idx, uint16_t count);
 
 // ── LED helpers ───────────────────────────────────────────────────────────────
 
@@ -154,50 +178,65 @@ CRGB heatmapColor(uint16_t count) {
     return blend(stops[seg], stops[seg + 1], frac);
 }
 
-// Redraw all map LEDs from current counts.
+// Apply heatmap color to a single entry's LED range and push to strip.
+static void applyEntryColor(State& e) {
+    CRGB color = (e.count == 0) ? e.idleColor : heatmapColor(e.count);
+    for (uint8_t j = e.ledFirst; j <= e.ledLast; j++)
+        leds[j] = color;
+}
+
+// Redraw all map LEDs (states + regions) from current counts.
 void refreshLEDs() {
     fill_solid(leds, NUM_LEDS, CRGB::Black);
-    for (uint8_t i = 0; i < NUM_STATES; i++) {
-        CRGB color = (states[i].count == 0) ? states[i].idleColor
-                                             : heatmapColor(states[i].count);
-        for (uint8_t j = states[i].ledFirst; j <= states[i].ledLast; j++) {
-            leds[j] = color;
-        }
-    }
+    for (uint8_t i = 0; i < NUM_STATES;   i++) applyEntryColor(states[i]);
+    for (uint8_t i = 0; i < NUM_REGIONS;  i++) applyEntryColor(regions[i]);
     FastLED.show();
 }
 
-// Case-insensitive search; returns index into states[] or -1 if not found.
-int findState(const char* name) {
-    for (uint8_t i = 0; i < NUM_STATES; i++) {
-        if (strcasecmp(states[i].name, name) == 0) return i;
-    }
-    return -1;
-}
-
-// Returns the index of the state with the highest count (>0), or -1 if all zero.
-int16_t findLeadingState() {
-    int16_t  best      = -1;
+// Returns pointer to the entry (state or region) with the highest count, or
+// nullptr if all counts are zero.
+State* findLeadingEntry() {
+    State*   best      = nullptr;
     uint16_t bestCount = 0;
-    for (uint8_t i = 0; i < NUM_STATES; i++) {
-        if (states[i].count > bestCount) {
-            bestCount = states[i].count;
-            best      = i;
-        }
+    for (uint8_t i = 0; i < NUM_STATES;  i++) {
+        if (states[i].count  > bestCount) { bestCount = states[i].count;  best = &states[i]; }
+    }
+    for (uint8_t i = 0; i < NUM_REGIONS; i++) {
+        if (regions[i].count > bestCount) { bestCount = regions[i].count; best = &regions[i]; }
     }
     return best;
 }
 
-// Increment a state's submission count and update its LEDs immediately.
+// Case-insensitive search helpers.
+int findState(const char* name) {
+    for (uint8_t i = 0; i < NUM_STATES;  i++)
+        if (strcasecmp(states[i].name,  name) == 0) return i;
+    return -1;
+}
+int findRegion(const char* name) {
+    for (uint8_t i = 0; i < NUM_REGIONS; i++)
+        if (strcasecmp(regions[i].name, name) == 0) return i;
+    return -1;
+}
+
+// Increment a state's count, persist it, refresh its LEDs, recompute the leader.
 void incrementState(int idx) {
     if (idx < 0 || idx >= NUM_STATES) return;
     states[idx].count++;
-    CRGB color = heatmapColor(states[idx].count);
-    for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++) {
-        leds[j] = color;
-    }
+    saveCount('s', idx, states[idx].count);
+    applyEntryColor(states[idx]);
     FastLED.show();
-    leadingStateIdx = findLeadingState();
+    leadingEntry = findLeadingEntry();
+}
+
+// Increment a region's count, persist it, refresh its LED, recompute the leader.
+void incrementRegion(int idx) {
+    if (idx < 0 || idx >= NUM_REGIONS) return;
+    regions[idx].count++;
+    saveCount('r', idx, regions[idx].count);
+    applyEntryColor(regions[idx]);
+    FastLED.show();
+    leadingEntry = findLeadingEntry();
 }
 
 // ── MAC address helpers ───────────────────────────────────────────────────────
@@ -231,6 +270,73 @@ void recordMAC(const uint8_t mac[6]) {
     if (seenMACCount < MAX_SUBMISSIONS) {
         memcpy(seenMACs[seenMACCount++], mac, 6);
     }
+}
+
+// ── Persistence ───────────────────────────────────────────────────────────────
+
+// Write a single count to NVS. Key format: "s0"–"s49" for states,
+// "r0"–"r5" for regions.
+void saveCount(char prefix, uint8_t idx, uint16_t count) {
+    char key[5];
+    snprintf(key, sizeof(key), "%c%u", prefix, idx);
+    prefs.begin(PREFS_NS, false);
+    prefs.putUShort(key, count);
+    prefs.end();
+}
+
+// Read all counts from NVS into states[] and regions[] on boot.
+void loadCounts() {
+    prefs.begin(PREFS_NS, true);
+    char key[5];
+    for (uint8_t i = 0; i < NUM_STATES;  i++) {
+        snprintf(key, sizeof(key), "s%u", i);
+        states[i].count  = prefs.getUShort(key, 0);
+    }
+    for (uint8_t i = 0; i < NUM_REGIONS; i++) {
+        snprintf(key, sizeof(key), "r%u", i);
+        regions[i].count = prefs.getUShort(key, 0);
+    }
+    prefs.end();
+    leadingEntry = findLeadingEntry();
+}
+
+// Append one submission line to the log file.
+void appendSubmission(const char* state, const char* country) {
+    File f = LittleFS.open(SUBS_FILE, "a");
+    if (!f) { Serial.println("LittleFS: failed to open subs file for append"); return; }
+    f.printf("%s,%s\n", state, country);
+    f.close();
+}
+
+// Load persisted submissions from the log file into the submissions[] array.
+void loadSubmissions() {
+    if (!LittleFS.exists(SUBS_FILE)) return;
+    File f = LittleFS.open(SUBS_FILE, "r");
+    if (!f) { Serial.println("LittleFS: failed to open subs file for read"); return; }
+    while (f.available() && submissionCount < MAX_SUBMISSIONS) {
+        String line = f.readStringUntil('\n');
+        line.trim();
+        if (line.isEmpty()) continue;
+        int comma = line.indexOf(',');
+        if (comma < 0) continue;
+        String s = line.substring(0, comma);
+        String c = line.substring(comma + 1);
+        strncpy(submissions[submissionCount].state,   s.c_str(), 63);
+        strncpy(submissions[submissionCount].country, c.c_str(), 63);
+        submissions[submissionCount].state[63]   = '\0';
+        submissions[submissionCount].country[63] = '\0';
+        submissionCount++;
+    }
+    f.close();
+    Serial.printf("Loaded %d submission(s) from flash\n", submissionCount);
+}
+
+// Erase all persisted data (called by admin clear).
+void clearPersistence() {
+    prefs.begin(PREFS_NS, false);
+    prefs.clear();
+    prefs.end();
+    if (LittleFS.exists(SUBS_FILE)) LittleFS.remove(SUBS_FILE);
 }
 
 // ── Web server setup ──────────────────────────────────────────────────────────
@@ -274,12 +380,21 @@ void setupServer() {
         // Record their MAC so they can't submit again
         if (macKnown) recordMAC(mac);
 
-        // Update the LED if this state is on the map
-        int idx = findState(state.c_str());
-        if (idx >= 0) incrementState(idx);
+        // Update LEDs — US state on the map strip, or a region LED
+        int stateIdx  = findState(state.c_str());
+        int regionIdx = findRegion(country.c_str());
 
-        newSubmissionIdx = idx;
-        newSubmission    = true;
+        if (stateIdx  >= 0) incrementState(stateIdx);
+        if (regionIdx >= 0) incrementRegion(regionIdx);
+
+        // Persist the submission to flash
+        appendSubmission(state.c_str(), country.c_str());
+
+        // Tell loop() which entry to blink (state takes priority if both matched)
+        if      (stateIdx  >= 0) newSubmissionEntry = &states[stateIdx];
+        else if (regionIdx >= 0) newSubmissionEntry = &regions[regionIdx];
+        else                     newSubmissionEntry = nullptr;
+        newSubmission = true;
 
         Serial.printf("Submission #%d — state: %s, country: %s\n",
                       submissionCount, state.c_str(), country.c_str());
@@ -296,10 +411,10 @@ void setupServer() {
     server.on("/admin/clear", HTTP_POST, [](AsyncWebServerRequest* req) {
         submissionCount = 0;
         seenMACCount    = 0;
-        for (uint8_t i = 0; i < NUM_STATES; i++) {
-            states[i].count = 0;
-        }
-        leadingStateIdx = -1;
+        for (uint8_t i = 0; i < NUM_STATES;  i++) states[i].count  = 0;
+        for (uint8_t i = 0; i < NUM_REGIONS; i++) regions[i].count = 0;
+        leadingEntry = nullptr;
+        clearPersistence();
         refreshLEDs();
         req->send(200, "application/json", "{\"ok\":true}");
     });
@@ -363,6 +478,15 @@ void setupServer() {
 void setup() {
     Serial.begin(115200);
 
+    // Mount LittleFS; format partition on first use if needed
+    if (!LittleFS.begin(true)) {
+        Serial.println("LittleFS mount failed — filesystem will not persist");
+    }
+
+    // Restore counts and submission log from flash
+    loadCounts();
+    loadSubmissions();
+
     // Onboard RGB LED
     FastLED.addLeds<WS2812B, ONBOARD_LED_PIN, GRB>(onboardLed, 1);
     // Map LED strip
@@ -398,49 +522,45 @@ void setup() {
 void loop() {
     dnsServer.processNextRequest();
 
-    // ── New submission: blink the state's LEDs + onboard LED green 3 times ──
+    // ── New submission: blink the entry's LEDs + onboard LED green 3 times ──
     if (newSubmission) {
         newSubmission = false;
-        int16_t idx = newSubmissionIdx;
-        newSubmissionIdx = -1;
+        State* entry = (State*)newSubmissionEntry;
+        newSubmissionEntry = nullptr;
 
         for (uint8_t i = 0; i < 3; i++) {
-            // Green on
             onboardLed[0] = CRGB::Green;
-            if (idx >= 0) {
-                for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++)
+            if (entry) {
+                for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
                     leds[j] = CRGB::Green;
             }
             FastLED.show();
             delay(150);
 
-            // Green off
             onboardLed[0] = CRGB::Black;
-            if (idx >= 0) {
-                for (uint8_t j = states[idx].ledFirst; j <= states[idx].ledLast; j++)
+            if (entry) {
+                for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
                     leds[j] = CRGB::Black;
             }
             FastLED.show();
             delay(150);
         }
 
-        // Restore heatmap colors after blink
         refreshLEDs();
     }
 
-    // ── Pulse the leading state ───────────────────────────────────────────────
-    // Uses sin8() to produce a smooth 0–255 sine wave, scaled to stay in the
-    // upper half of brightness so the color is always recognisable.
+    // ── Pulse the leading state/region ───────────────────────────────────────
+    // sin8 input wraps every 256 counts; >> 3 ≈ 2 s period. Level stays in
+    // the upper half (128–255) so the heatmap color stays recognisable.
     static uint32_t lastPulse = 0;
     if (millis() - lastPulse >= 20) {   // ~50 fps
         lastPulse = millis();
-        int16_t li = leadingStateIdx;
-        if (li >= 0 && states[li].count > 0) {
-            // sin8 input wraps every 256 counts; >> 3 gives ~2 s period
+        State* le = leadingEntry;
+        if (le && le->count > 0) {
             uint8_t level = 128 + scale8(sin8((uint8_t)(millis() >> 3)), 127);
-            CRGB    color = heatmapColor(states[li].count);
+            CRGB    color = heatmapColor(le->count);
             color.nscale8(level);
-            for (uint8_t j = states[li].ledFirst; j <= states[li].ledLast; j++)
+            for (uint8_t j = le->ledFirst; j <= le->ledLast; j++)
                 leds[j] = color;
             FastLED.show();
         }
