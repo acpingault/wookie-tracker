@@ -15,15 +15,15 @@ static Preferences prefs;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 #define DATA_PIN              5     // map LED strip
-#define DATA_PIN_BANNER_TOP   6     // top banner LED strip
-#define DATA_PIN_BANNER_BOT   7     // bottom banner LED strip
+#define DATA_PIN_BANNER_TOP   16    // top banner LED strip
+#define DATA_PIN_BANNER_BOT   17    // bottom banner LED strip
 #define NUM_LEDS              106   // 100 state LEDs (0–99) + 6 region LEDs (100–105)
 #define NUM_LEDS_BANNER_TOP   30    // LEDs in the top banner
 #define NUM_LEDS_BANNER_BOT   30    // LEDs in the bottom banner
 #define LED_TYPE          WS2812B
 #define COLOR_ORDER       GRB
 #define BRIGHTNESS        64        // 0–255
-#define ONBOARD_LED_PIN   48        // RGB WS2812B on GPIO 48 (ESP32-S3 DevKitC)
+#define STATUS_LED_PIN    2         // Built-in blue LED on ESP32-WROOM-32E
 #define BLINK_INTERVAL_MS 500
 #define HEAT_MAX          10        // submission count that reaches peak "hot" red
 
@@ -39,7 +39,6 @@ static const uint16_t MAX_SUBMISSIONS = 500;
 CRGB leds[NUM_LEDS];
 CRGB bannerTopLeds[NUM_LEDS_BANNER_TOP];
 CRGB bannerBotLeds[NUM_LEDS_BANNER_BOT];
-CRGB onboardLed[1];
 
 // ── State map ─────────────────────────────────────────────────────────────────
 struct State {
@@ -487,8 +486,9 @@ void setup() {
     loadCounts();
     loadSubmissions();
 
-    // Onboard RGB LED
-    FastLED.addLeds<WS2812B, ONBOARD_LED_PIN, GRB>(onboardLed, 1);
+    pinMode(STATUS_LED_PIN, OUTPUT);
+    digitalWrite(STATUS_LED_PIN, LOW);
+
     // Map LED strip
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS)
            .setCorrection(TypicalLEDStrip);
@@ -500,7 +500,6 @@ void setup() {
     FastLED.setBrightness(BRIGHTNESS);
 
     fill_solid(leds, NUM_LEDS, CRGB::Black);
-    onboardLed[0] = CRGB::Black;
     FastLED.show();
     delay(500);
 
@@ -529,7 +528,7 @@ void loop() {
         newSubmissionEntry = nullptr;
 
         for (uint8_t i = 0; i < 3; i++) {
-            onboardLed[0] = CRGB::Green;
+            digitalWrite(STATUS_LED_PIN, HIGH);
             if (entry) {
                 for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
                     leds[j] = CRGB::Green;
@@ -537,7 +536,7 @@ void loop() {
             FastLED.show();
             delay(150);
 
-            onboardLed[0] = CRGB::Black;
+            digitalWrite(STATUS_LED_PIN, LOW);
             if (entry) {
                 for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
                     leds[j] = CRGB::Black;
@@ -573,7 +572,6 @@ void loop() {
     if (millis() - lastBlink >= BLINK_INTERVAL_MS) {
         lastBlink = millis();
         ledState  = !ledState;
-        onboardLed[0] = ledState ? CRGB::Blue : CRGB::Black;
-        FastLED.show();
+        digitalWrite(STATUS_LED_PIN, ledState ? HIGH : LOW);
     }
 }
