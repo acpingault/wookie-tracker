@@ -87,7 +87,7 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
   <div class="card">
     <a href="/admin"><button class="gear-btn" type="button" title="Admin">&#9881;</button></a>
     <h1>Where are you from?</h1>
-    <p class="subtitle">Sign our map and light up your home!</p>
+    <p class="subtitle">Light up the board and let us know where the wookies are from!</p>
     <form method="POST" action="/submit">
       <label for="country">Region</label>
       <select id="country" name="country" required autocomplete="country-name" onchange="onRegion(this.value)">

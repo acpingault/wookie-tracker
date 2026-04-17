@@ -14,12 +14,14 @@ static Preferences prefs;
 #define SUBS_FILE "/subs.csv"    // LittleFS path for submission log
 
 // ── Configuration ─────────────────────────────────────────────────────────────
-#define DATA_PIN              5     // map LED strip
+#define DATA_PIN              5     // map LED strip (states)
+#define DATA_PIN_REGIONS      18    // region LED strip (6 individual LEDs)
 #define DATA_PIN_BANNER_TOP   16    // top banner LED strip
 #define DATA_PIN_BANNER_BOT   17    // bottom banner LED strip
-#define NUM_LEDS              106   // 100 state LEDs (0–99) + 6 region LEDs (100–105)
-#define NUM_LEDS_BANNER_TOP   30    // LEDs in the top banner
-#define NUM_LEDS_BANNER_BOT   30    // LEDs in the bottom banner
+#define NUM_LEDS              100   // LEDs in the map strip
+#define NUM_LEDS_REGIONS      6     // one LED per non-US region
+#define NUM_LEDS_BANNER_TOP   100    // LEDs in the top banner
+#define NUM_LEDS_BANNER_BOT   100    // LEDs in the bottom banner
 #define LED_TYPE          WS2812B
 #define COLOR_ORDER       GRB
 #define BRIGHTNESS        64        // 0–255
@@ -31,7 +33,7 @@ static Preferences prefs;
 #define SHIMMER_MIN_BRI   40           // minimum brightness (0–255); keeps LEDs from going dark
 
 // Access Point credentials
-static const char* AP_SSID     = "MapExplorer";
+static const char* AP_SSID     = "WhereTheWookiesAre";
 static const char* AP_PASSWORD = "";            // leave empty for open network
 
 // Maximum number of visitor submissions to store in memory
@@ -40,85 +42,87 @@ static const uint16_t MAX_SUBMISSIONS = 500;
 
 // ── LED arrays ────────────────────────────────────────────────────────────────
 CRGB leds[NUM_LEDS];
+CRGB regionLeds[NUM_LEDS_REGIONS];
 CRGB bannerTopLeds[NUM_LEDS_BANNER_TOP];
 CRGB bannerBotLeds[NUM_LEDS_BANNER_BOT];
 
 // ── State map ─────────────────────────────────────────────────────────────────
 struct State {
     const char* name;
-    uint8_t     ledFirst;        // first LED index in the map strip (inclusive)
-    uint8_t     ledLast;         // last  LED index in the map strip (inclusive)
+    uint8_t     ledFirst;        // first LED index in the strip (inclusive)
+    uint8_t     ledLast;         // last  LED index in the strip (inclusive)
+    CRGB*       strip;           // which LED array this entry writes to
     CRGB        idleColor;       // shown when count == 0
-    uint16_t    count;           // number of submissions from this state
+    uint16_t    count;           // number of submissions from this state/region
 };
 
 static State states[] = {
-    // { "StateName", ledFirst, ledLast, idleColor, count }
-    { "Alabama",         0,  1, CRGB::DimGray, 0 },
-    { "Alaska",          2,  3, CRGB::DimGray, 0 },
-    { "Arizona",         4,  5, CRGB::DimGray, 0 },
-    { "Arkansas",        6,  7, CRGB::DimGray, 0 },
-    { "California",      8,  9, CRGB::DimGray, 0 },
-    { "Colorado",       10, 11, CRGB::DimGray, 0 },
-    { "Connecticut",    12, 13, CRGB::DimGray, 0 },
-    { "Delaware",       14, 15, CRGB::DimGray, 0 },
-    { "Florida",        16, 17, CRGB::DimGray, 0 },
-    { "Georgia",        18, 19, CRGB::DimGray, 0 },
-    { "Hawaii",         20, 21, CRGB::DimGray, 0 },
-    { "Idaho",          22, 23, CRGB::DimGray, 0 },
-    { "Illinois",       24, 25, CRGB::DimGray, 0 },
-    { "Indiana",        26, 27, CRGB::DimGray, 0 },
-    { "Iowa",           28, 29, CRGB::DimGray, 0 },
-    { "Kansas",         30, 31, CRGB::DimGray, 0 },
-    { "Kentucky",       32, 33, CRGB::DimGray, 0 },
-    { "Louisiana",      34, 35, CRGB::DimGray, 0 },
-    { "Maine",          36, 37, CRGB::DimGray, 0 },
-    { "Maryland",       38, 39, CRGB::DimGray, 0 },
-    { "Massachusetts",  40, 41, CRGB::DimGray, 0 },
-    { "Michigan",       42, 43, CRGB::DimGray, 0 },
-    { "Minnesota",      44, 45, CRGB::DimGray, 0 },
-    { "Mississippi",    46, 47, CRGB::DimGray, 0 },
-    { "Missouri",       48, 49, CRGB::DimGray, 0 },
-    { "Montana",        50, 51, CRGB::DimGray, 0 },
-    { "Nebraska",       52, 53, CRGB::DimGray, 0 },
-    { "Nevada",         54, 55, CRGB::DimGray, 0 },
-    { "New Hampshire",  56, 57, CRGB::DimGray, 0 },
-    { "New Jersey",     58, 59, CRGB::DimGray, 0 },
-    { "New Mexico",     60, 61, CRGB::DimGray, 0 },
-    { "New York",       62, 63, CRGB::DimGray, 0 },
-    { "North Carolina", 64, 65, CRGB::DimGray, 0 },
-    { "North Dakota",   66, 67, CRGB::DimGray, 0 },
-    { "Ohio",           68, 69, CRGB::DimGray, 0 },
-    { "Oklahoma",       70, 71, CRGB::DimGray, 0 },
-    { "Oregon",         72, 73, CRGB::DimGray, 0 },
-    { "Pennsylvania",   74, 75, CRGB::DimGray, 0 },
-    { "Rhode Island",   76, 77, CRGB::DimGray, 0 },
-    { "South Carolina", 78, 79, CRGB::DimGray, 0 },
-    { "South Dakota",   80, 81, CRGB::DimGray, 0 },
-    { "Tennessee",      82, 83, CRGB::DimGray, 0 },
-    { "Texas",          84, 85, CRGB::DimGray, 0 },
-    { "Utah",           86, 87, CRGB::DimGray, 0 },
-    { "Vermont",        88, 89, CRGB::DimGray, 0 },
-    { "Virginia",       90, 91, CRGB::DimGray, 0 },
-    { "Washington",     92, 93, CRGB::DimGray, 0 },
-    { "West Virginia",  94, 95, CRGB::DimGray, 0 },
-    { "Wisconsin",      96, 97, CRGB::DimGray, 0 },
-    { "Wyoming",        98, 99, CRGB::DimGray, 0 },
+    // { "StateName", ledFirst, ledLast, strip, idleColor, count }
+    { "Alabama",         0,  1, leds, CRGB::DimGray, 0 },
+    { "Alaska",          2,  3, leds, CRGB::DimGray, 0 },
+    { "Arizona",         4,  5, leds, CRGB::DimGray, 0 },
+    { "Arkansas",        6,  7, leds, CRGB::DimGray, 0 },
+    { "California",      8,  9, leds, CRGB::DimGray, 0 },
+    { "Colorado",       10, 11, leds, CRGB::DimGray, 0 },
+    { "Connecticut",    12, 13, leds, CRGB::DimGray, 0 },
+    { "Delaware",       14, 15, leds, CRGB::DimGray, 0 },
+    { "Florida",        16, 17, leds, CRGB::DimGray, 0 },
+    { "Georgia",        18, 19, leds, CRGB::DimGray, 0 },
+    { "Hawaii",         20, 21, leds, CRGB::DimGray, 0 },
+    { "Idaho",          22, 23, leds, CRGB::DimGray, 0 },
+    { "Illinois",       24, 25, leds, CRGB::DimGray, 0 },
+    { "Indiana",        26, 27, leds, CRGB::DimGray, 0 },
+    { "Iowa",           28, 29, leds, CRGB::DimGray, 0 },
+    { "Kansas",         30, 31, leds, CRGB::DimGray, 0 },
+    { "Kentucky",       32, 33, leds, CRGB::DimGray, 0 },
+    { "Louisiana",      34, 35, leds, CRGB::DimGray, 0 },
+    { "Maine",          36, 37, leds, CRGB::DimGray, 0 },
+    { "Maryland",       38, 39, leds, CRGB::DimGray, 0 },
+    { "Massachusetts",  40, 41, leds, CRGB::DimGray, 0 },
+    { "Michigan",       42, 43, leds, CRGB::DimGray, 0 },
+    { "Minnesota",      44, 45, leds, CRGB::DimGray, 0 },
+    { "Mississippi",    46, 47, leds, CRGB::DimGray, 0 },
+    { "Missouri",       48, 49, leds, CRGB::DimGray, 0 },
+    { "Montana",        50, 51, leds, CRGB::DimGray, 0 },
+    { "Nebraska",       52, 53, leds, CRGB::DimGray, 0 },
+    { "Nevada",         54, 55, leds, CRGB::DimGray, 0 },
+    { "New Hampshire",  56, 57, leds, CRGB::DimGray, 0 },
+    { "New Jersey",     58, 59, leds, CRGB::DimGray, 0 },
+    { "New Mexico",     60, 61, leds, CRGB::DimGray, 0 },
+    { "New York",       62, 63, leds, CRGB::DimGray, 0 },
+    { "North Carolina", 64, 65, leds, CRGB::DimGray, 0 },
+    { "North Dakota",   66, 67, leds, CRGB::DimGray, 0 },
+    { "Ohio",           68, 69, leds, CRGB::DimGray, 0 },
+    { "Oklahoma",       70, 71, leds, CRGB::DimGray, 0 },
+    { "Oregon",         72, 73, leds, CRGB::DimGray, 0 },
+    { "Pennsylvania",   74, 75, leds, CRGB::DimGray, 0 },
+    { "Rhode Island",   76, 77, leds, CRGB::DimGray, 0 },
+    { "South Carolina", 78, 79, leds, CRGB::DimGray, 0 },
+    { "South Dakota",   80, 81, leds, CRGB::DimGray, 0 },
+    { "Tennessee",      82, 83, leds, CRGB::DimGray, 0 },
+    { "Texas",          84, 85, leds, CRGB::DimGray, 0 },
+    { "Utah",           86, 87, leds, CRGB::DimGray, 0 },
+    { "Vermont",        88, 89, leds, CRGB::DimGray, 0 },
+    { "Virginia",       90, 91, leds, CRGB::DimGray, 0 },
+    { "Washington",     92, 93, leds, CRGB::DimGray, 0 },
+    { "West Virginia",  94, 95, leds, CRGB::DimGray, 0 },
+    { "Wisconsin",      96, 97, leds, CRGB::DimGray, 0 },
+    { "Wyoming",        98, 99, leds, CRGB::DimGray, 0 },
 };
 
 static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
 
-// ── Region LEDs (individual LEDs, indices 100–105 on the map strip) ───────────
+// ── Region LEDs (one LED each on their own strip, GPIO DATA_PIN_REGIONS) ──────
 // These share the same State struct and heatmap scheme as US states.
 // "country" form field value must match name exactly (case-insensitive).
 static State regions[] = {
-    // { "RegionName", ledIndex, ledIndex, idleColor, count }
-    { "Canada",    100, 100, CRGB::DimGray, 0 },
-    { "Mexico",    101, 101, CRGB::DimGray, 0 },
-    { "Europe",    102, 102, CRGB::DimGray, 0 },
-    { "Asia",      103, 103, CRGB::DimGray, 0 },
-    { "Africa",    104, 104, CRGB::DimGray, 0 },
-    { "Australia", 105, 105, CRGB::DimGray, 0 },
+    // { "RegionName", ledIndex, ledIndex, strip, idleColor, count }
+    { "Canada",    0, 0, regionLeds, CRGB::DimGray, 0 },
+    { "Mexico",    1, 1, regionLeds, CRGB::DimGray, 0 },
+    { "Europe",    2, 2, regionLeds, CRGB::DimGray, 0 },
+    { "Asia",      3, 3, regionLeds, CRGB::DimGray, 0 },
+    { "Africa",    4, 4, regionLeds, CRGB::DimGray, 0 },
+    { "Australia", 5, 5, regionLeds, CRGB::DimGray, 0 },
 };
 
 static const uint8_t NUM_REGIONS = sizeof(regions) / sizeof(regions[0]);
@@ -184,18 +188,19 @@ CRGB heatmapColor(uint16_t count) {
     return blend(stops[seg], stops[seg + 1], frac);
 }
 
-// Apply heatmap color to a single entry's LED range and push to strip.
+// Apply heatmap color to a single entry's LED range on its own strip.
 static void applyEntryColor(State& e) {
     CRGB color = (e.count == 0) ? e.idleColor : heatmapColor(e.count);
     for (uint8_t j = e.ledFirst; j <= e.ledLast; j++)
-        leds[j] = color;
+        e.strip[j] = color;
 }
 
-// Redraw all map LEDs (states + regions) from current counts.
+// Redraw all map and region LEDs from current counts.
 void refreshLEDs() {
-    fill_solid(leds, NUM_LEDS, CRGB::Black);
-    for (uint8_t i = 0; i < NUM_STATES;   i++) applyEntryColor(states[i]);
-    for (uint8_t i = 0; i < NUM_REGIONS;  i++) applyEntryColor(regions[i]);
+    fill_solid(leds,       NUM_LEDS,         CRGB::Black);
+    fill_solid(regionLeds, NUM_LEDS_REGIONS, CRGB::Black);
+    for (uint8_t i = 0; i < NUM_STATES;  i++) applyEntryColor(states[i]);
+    for (uint8_t i = 0; i < NUM_REGIONS; i++) applyEntryColor(regions[i]);
     FastLED.show();
 }
 
@@ -496,8 +501,11 @@ void setup() {
     pinMode(STATUS_LED_PIN, OUTPUT);
     digitalWrite(STATUS_LED_PIN, LOW);
 
-    // Map LED strip
+    // Map LED strip (states)
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS)
+           .setCorrection(TypicalLEDStrip);
+    // Region LED strip
+    FastLED.addLeds<LED_TYPE, DATA_PIN_REGIONS, COLOR_ORDER>(regionLeds, NUM_LEDS_REGIONS)
            .setCorrection(TypicalLEDStrip);
     // Banner LED strips
     FastLED.addLeds<LED_TYPE, DATA_PIN_BANNER_TOP, COLOR_ORDER>(bannerTopLeds, NUM_LEDS_BANNER_TOP)
@@ -538,7 +546,7 @@ void loop() {
             digitalWrite(STATUS_LED_PIN, HIGH);
             if (entry) {
                 for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
-                    leds[j] = CRGB::Green;
+                    entry->strip[j] = CRGB::Green;
             }
             FastLED.show();
             delay(150);
@@ -546,7 +554,7 @@ void loop() {
             digitalWrite(STATUS_LED_PIN, LOW);
             if (entry) {
                 for (uint8_t j = entry->ledFirst; j <= entry->ledLast; j++)
-                    leds[j] = CRGB::Black;
+                    entry->strip[j] = CRGB::Black;
             }
             FastLED.show();
             delay(150);
@@ -570,7 +578,7 @@ void loop() {
             CRGB    color = heatmapColor(le->count);
             color.nscale8(level);
             for (uint8_t j = le->ledFirst; j <= le->ledLast; j++)
-                leds[j] = color;
+                le->strip[j] = color;
             dirty = true;
         }
         if (dirty) FastLED.show();
