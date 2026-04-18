@@ -14,23 +14,21 @@ static Preferences prefs;
 #define SUBS_FILE "/subs.csv"    // LittleFS path for submission log
 
 // ── Configuration ─────────────────────────────────────────────────────────────
-#define DATA_PIN              5     // map LED strip (states)
-#define DATA_PIN_REGIONS      18    // region LED strip (6 individual LEDs)
-#define DATA_PIN_BANNER_TOP   16    // top banner LED strip
+#define DATA_PIN              16     // map LED strip (states)
+#define DATA_PIN_REGIONS      5    // region LED strip (6 individual LEDs)
+#define DATA_PIN_BANNER_TOP   18    // top banner LED strip
 #define DATA_PIN_BANNER_BOT   17    // bottom banner LED strip
-#define NUM_LEDS              100   // LEDs in the map strip
+#define NUM_LEDS              153   // LEDs in the map strip
 #define NUM_LEDS_REGIONS      6     // one LED per non-US region
 #define NUM_LEDS_BANNER_TOP   100    // LEDs in the top banner
-#define NUM_LEDS_BANNER_BOT   100    // LEDs in the bottom banner
+#define NUM_LEDS_BANNER_BOT   165    // LEDs in the bottom banner
 #define LED_TYPE          WS2812B
 #define COLOR_ORDER       GRB
-#define BRIGHTNESS        64        // 0–255
+#define BRIGHTNESS        200        // 0–255 (~25%)
 #define STATUS_LED_PIN    2         // Built-in blue LED on ESP32-WROOM-32E
 #define BLINK_INTERVAL_MS 500
 #define HEAT_TOP_PCT      15        // % of total submissions that pegs peak "hot" red
-#define SHIMMER_COLOR     CRGB::White  // base color for banner shimmer
-#define SHIMMER_SPEED     3            // higher = faster shimmer
-#define SHIMMER_MIN_BRI   40           // minimum brightness (0–255); keeps LEDs from going dark
+#define BANNER_COLOR      CRGB::Red    // solid color for top and bottom banners
 
 // Access Point credentials
 static const char* AP_SSID     = "WhereTheWookiesAre";
@@ -58,56 +56,56 @@ struct State {
 
 static State states[] = {
     // { "StateName", ledFirst, ledLast, strip, idleColor, count }
-    { "Alabama",         0,  1, leds, CRGB::DimGray, 0 },
-    { "Alaska",          2,  3, leds, CRGB::DimGray, 0 },
-    { "Arizona",         4,  5, leds, CRGB::DimGray, 0 },
-    { "Arkansas",        6,  7, leds, CRGB::DimGray, 0 },
-    { "California",      8,  9, leds, CRGB::DimGray, 0 },
-    { "Colorado",       10, 11, leds, CRGB::DimGray, 0 },
-    { "Connecticut",    12, 13, leds, CRGB::DimGray, 0 },
-    { "Delaware",       14, 15, leds, CRGB::DimGray, 0 },
-    { "Florida",        16, 17, leds, CRGB::DimGray, 0 },
-    { "Georgia",        18, 19, leds, CRGB::DimGray, 0 },
-    { "Hawaii",         20, 21, leds, CRGB::DimGray, 0 },
-    { "Idaho",          22, 23, leds, CRGB::DimGray, 0 },
-    { "Illinois",       24, 25, leds, CRGB::DimGray, 0 },
-    { "Indiana",        26, 27, leds, CRGB::DimGray, 0 },
-    { "Iowa",           28, 29, leds, CRGB::DimGray, 0 },
-    { "Kansas",         30, 31, leds, CRGB::DimGray, 0 },
-    { "Kentucky",       32, 33, leds, CRGB::DimGray, 0 },
-    { "Louisiana",      34, 35, leds, CRGB::DimGray, 0 },
-    { "Maine",          36, 37, leds, CRGB::DimGray, 0 },
-    { "Maryland",       38, 39, leds, CRGB::DimGray, 0 },
-    { "Massachusetts",  40, 41, leds, CRGB::DimGray, 0 },
-    { "Michigan",       42, 43, leds, CRGB::DimGray, 0 },
-    { "Minnesota",      44, 45, leds, CRGB::DimGray, 0 },
-    { "Mississippi",    46, 47, leds, CRGB::DimGray, 0 },
-    { "Missouri",       48, 49, leds, CRGB::DimGray, 0 },
-    { "Montana",        50, 51, leds, CRGB::DimGray, 0 },
-    { "Nebraska",       52, 53, leds, CRGB::DimGray, 0 },
-    { "Nevada",         54, 55, leds, CRGB::DimGray, 0 },
-    { "New Hampshire",  56, 57, leds, CRGB::DimGray, 0 },
-    { "New Jersey",     58, 59, leds, CRGB::DimGray, 0 },
-    { "New Mexico",     60, 61, leds, CRGB::DimGray, 0 },
-    { "New York",       62, 63, leds, CRGB::DimGray, 0 },
-    { "North Carolina", 64, 65, leds, CRGB::DimGray, 0 },
-    { "North Dakota",   66, 67, leds, CRGB::DimGray, 0 },
-    { "Ohio",           68, 69, leds, CRGB::DimGray, 0 },
-    { "Oklahoma",       70, 71, leds, CRGB::DimGray, 0 },
-    { "Oregon",         72, 73, leds, CRGB::DimGray, 0 },
-    { "Pennsylvania",   74, 75, leds, CRGB::DimGray, 0 },
-    { "Rhode Island",   76, 77, leds, CRGB::DimGray, 0 },
-    { "South Carolina", 78, 79, leds, CRGB::DimGray, 0 },
-    { "South Dakota",   80, 81, leds, CRGB::DimGray, 0 },
-    { "Tennessee",      82, 83, leds, CRGB::DimGray, 0 },
-    { "Texas",          84, 85, leds, CRGB::DimGray, 0 },
-    { "Utah",           86, 87, leds, CRGB::DimGray, 0 },
-    { "Vermont",        88, 89, leds, CRGB::DimGray, 0 },
-    { "Virginia",       90, 91, leds, CRGB::DimGray, 0 },
-    { "Washington",     92, 93, leds, CRGB::DimGray, 0 },
-    { "West Virginia",  94, 95, leds, CRGB::DimGray, 0 },
-    { "Wisconsin",      96, 97, leds, CRGB::DimGray, 0 },
-    { "Wyoming",        98, 99, leds, CRGB::DimGray, 0 },
+    { "Alabama",         0,  1, leds, CRGB::Red, 0 },
+    { "Alaska",          2,  3, leds, CRGB::Red, 0 },
+    { "Arizona",         4,  5, leds, CRGB::Red, 0 },
+    { "Arkansas",        6,  7, leds, CRGB::Red, 0 },
+    { "California",      8,  9, leds, CRGB::Red, 0 },
+    { "Colorado",       10, 11, leds, CRGB::Red, 0 },
+    { "Connecticut",    12, 13, leds, CRGB::Red, 0 },
+    { "Delaware",       14, 15, leds, CRGB::Red, 0 },
+    { "Florida",        16, 17, leds, CRGB::Red, 0 },
+    { "Georgia",        18, 19, leds, CRGB::Red, 0 },
+    { "Hawaii",         20, 21, leds, CRGB::Red, 0 },
+    { "Idaho",          22, 23, leds, CRGB::Red, 0 },
+    { "Illinois",       24, 25, leds, CRGB::Red, 0 },
+    { "Indiana",        26, 27, leds, CRGB::Red, 0 },
+    { "Iowa",           28, 29, leds, CRGB::Red, 0 },
+    { "Kansas",         30, 31, leds, CRGB::Red, 0 },
+    { "Kentucky",       32, 33, leds, CRGB::Red, 0 },
+    { "Louisiana",      34, 35, leds, CRGB::Red, 0 },
+    { "Maine",          36, 37, leds, CRGB::Red, 0 },
+    { "Maryland",       38, 39, leds, CRGB::Red, 0 },
+    { "Massachusetts",  40, 41, leds, CRGB::Red, 0 },
+    { "Michigan",       42, 43, leds, CRGB::Red, 0 },
+    { "Minnesota",      44, 45, leds, CRGB::Red, 0 },
+    { "Mississippi",    46, 47, leds, CRGB::Red, 0 },
+    { "Missouri",       48, 49, leds, CRGB::Red, 0 },
+    { "Montana",        50, 51, leds, CRGB::Red, 0 },
+    { "Nebraska",       52, 53, leds, CRGB::Red, 0 },
+    { "Nevada",         54, 55, leds, CRGB::Red, 0 },
+    { "New Hampshire",  56, 57, leds, CRGB::Red, 0 },
+    { "New Jersey",     58, 59, leds, CRGB::Red, 0 },
+    { "New Mexico",     60, 61, leds, CRGB::Red, 0 },
+    { "New York",       62, 63, leds, CRGB::Red, 0 },
+    { "North Carolina", 64, 65, leds, CRGB::Red, 0 },
+    { "North Dakota",   66, 67, leds, CRGB::Red, 0 },
+    { "Ohio",           68, 69, leds, CRGB::Red, 0 },
+    { "Oklahoma",       70, 71, leds, CRGB::Red, 0 },
+    { "Oregon",         72, 73, leds, CRGB::Red, 0 },
+    { "Pennsylvania",   74, 75, leds, CRGB::Red, 0 },
+    { "Rhode Island",   76, 77, leds, CRGB::Red, 0 },
+    { "South Carolina", 78, 79, leds, CRGB::Red, 0 },
+    { "South Dakota",   80, 81, leds, CRGB::Red, 0 },
+    { "Tennessee",      82, 83, leds, CRGB::Red, 0 },
+    { "Texas",          84, 85, leds, CRGB::Red, 0 },
+    { "Utah",           86, 87, leds, CRGB::Red, 0 },
+    { "Vermont",        88, 89, leds, CRGB::Red, 0 },
+    { "Virginia",       90, 91, leds, CRGB::Red, 0 },
+    { "Washington",     92, 93, leds, CRGB::Red, 0 },
+    { "West Virginia",  94, 95, leds, CRGB::Red, 0 },
+    { "Wisconsin",      96, 97, leds, CRGB::Red, 0 },
+    { "Wyoming",        98, 152, leds, CRGB::Red, 0 },
 };
 
 static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
@@ -117,12 +115,12 @@ static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
 // "country" form field value must match name exactly (case-insensitive).
 static State regions[] = {
     // { "RegionName", ledIndex, ledIndex, strip, idleColor, count }
-    { "Canada",    0, 0, regionLeds, CRGB::DimGray, 0 },
-    { "Mexico",    1, 1, regionLeds, CRGB::DimGray, 0 },
-    { "Europe",    2, 2, regionLeds, CRGB::DimGray, 0 },
-    { "Asia",      3, 3, regionLeds, CRGB::DimGray, 0 },
-    { "Africa",    4, 4, regionLeds, CRGB::DimGray, 0 },
-    { "Australia", 5, 5, regionLeds, CRGB::DimGray, 0 },
+    { "Canada",    0, 0, regionLeds, CRGB::Red, 0 },
+    { "Mexico",    1, 1, regionLeds, CRGB::Red, 0 },
+    { "Europe",    2, 2, regionLeds, CRGB::Red, 0 },
+    { "Asia",      3, 3, regionLeds, CRGB::Red, 0 },
+    { "Africa",    4, 4, regionLeds, CRGB::Red, 0 },
+    { "Australia", 5, 5, regionLeds, CRGB::Red, 0 },
 };
 
 static const uint8_t NUM_REGIONS = sizeof(regions) / sizeof(regions[0]);
@@ -430,6 +428,49 @@ void setupServer() {
         req->send(200, "application/json", "{\"ok\":true}");
     });
 
+    // Top-5 endpoint — returns the 5 states/regions with the highest counts
+    server.on("/stats", HTTP_GET, [](AsyncWebServerRequest* req) {
+        // Track which indices have already been selected
+        bool usedState[NUM_STATES]  = {};
+        bool usedRegion[NUM_REGIONS] = {};
+
+        String json = "{\"top\":[";
+        bool first = true;
+
+        for (uint8_t rank = 0; rank < 5; rank++) {
+            uint16_t    best          = 0;
+            int         bestIdx       = -1;
+            bool        bestIsRegion  = false;
+
+            for (uint8_t i = 0; i < NUM_STATES; i++) {
+                if (!usedState[i] && states[i].count > best) {
+                    best = states[i].count; bestIdx = i; bestIsRegion = false;
+                }
+            }
+            for (uint8_t i = 0; i < NUM_REGIONS; i++) {
+                if (!usedRegion[i] && regions[i].count > best) {
+                    best = regions[i].count; bestIdx = i; bestIsRegion = true;
+                }
+            }
+
+            if (bestIdx < 0 || best == 0) break;
+
+            if (!first) json += ',';
+            first = false;
+            json += "{\"name\":\"";
+            json += bestIsRegion ? regions[bestIdx].name : states[bestIdx].name;
+            json += "\",\"count\":";
+            json += best;
+            json += "}";
+
+            if (bestIsRegion) usedRegion[bestIdx] = true;
+            else              usedState[bestIdx]  = true;
+        }
+
+        json += "]}";
+        req->send(200, "application/json", json);
+    });
+
     // JSON endpoint — visit http://192.168.4.1/data to see all submissions
     server.on("/data", HTTP_GET, [](AsyncWebServerRequest* req) {
         String json = "{\"count\":";
@@ -583,22 +624,9 @@ void loop() {
         }
         if (dirty) FastLED.show();
 
-        // Shimmer the banners using Perlin noise — each LED gets a smooth
-        // organic brightness driven by its position and the current time.
-        uint16_t t = (uint16_t)(millis() / SHIMMER_SPEED);
-        for (uint8_t i = 0; i < NUM_LEDS_BANNER_TOP; i++) {
-            uint8_t bri = scale8(inoise8(i * 40, t), 255 - SHIMMER_MIN_BRI) + SHIMMER_MIN_BRI;
-            CRGB c = SHIMMER_COLOR;
-            c.nscale8(bri);
-            bannerTopLeds[i] = c;
-        }
-        for (uint8_t i = 0; i < NUM_LEDS_BANNER_BOT; i++) {
-            // Offset the noise by a large prime so top and bottom shimmer independently
-            uint8_t bri = scale8(inoise8(i * 40 + 10000, t), 255 - SHIMMER_MIN_BRI) + SHIMMER_MIN_BRI;
-            CRGB c = SHIMMER_COLOR;
-            c.nscale8(bri);
-            bannerBotLeds[i] = c;
-        }
+        // Banners disabled — uncomment to re-enable
+         fill_solid(bannerTopLeds, NUM_LEDS_BANNER_TOP, BANNER_COLOR);
+         fill_solid(bannerBotLeds, NUM_LEDS_BANNER_BOT, BANNER_COLOR);
         FastLED.show();
     }
 

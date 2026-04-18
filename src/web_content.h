@@ -81,14 +81,34 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
     }
     button:hover { background: #c73652; }
     button:active { background: #a82d46; }
+    .counter { text-align: center; color: #8892a4; font-size: 0.88rem; margin-bottom: 24px; }
+    .counter strong { color: #e94560; }
+    .success { display: none; text-align: center; padding: 12px 0; }
+    .success.show { display: block; animation: fadeUp 0.35s ease; }
+    .success .icon { font-size: 3rem; display: block; margin-bottom: 14px; animation: pop 0.4s cubic-bezier(0.175,0.885,0.32,1.275); }
+    .success h2 { font-size: 1.4rem; margin-bottom: 8px; }
+    .success p { color: #8892a4; font-size: 0.92rem; margin-bottom: 24px; }
+    .leaderboard { text-align: left; margin-bottom: 24px; }
+    .leaderboard h3 { font-size: 0.8rem; color: #aab; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 12px; }
+    .lb-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 0.92rem; }
+    .lb-rank { width: 20px; color: #8892a4; text-align: right; flex-shrink: 0; }
+    .lb-bar-wrap { flex: 1; background: #0f2040; border-radius: 4px; height: 6px; overflow: hidden; }
+    .lb-bar { height: 100%; border-radius: 4px; background: #e94560; transition: width 0.6s ease; }
+    .lb-name { width: 130px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .lb-count { color: #8892a4; font-size: 0.82rem; flex-shrink: 0; }
+    @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+    @keyframes pop    { from { transform:scale(0); } to { transform:scale(1); } }
   </style>
 </head>
 <body>
   <div class="card">
     <a href="/admin"><button class="gear-btn" type="button" title="Admin">&#9881;</button></a>
+    <!-- form panel -->
+    <div id="form-panel">
     <h1>Where are you from?</h1>
     <p class="subtitle">Light up the board and let us know where the wookies are from!</p>
-    <form method="POST" action="/submit">
+    <p class="counter" id="counter" style="display:none">Join <strong id="sub-count">0</strong> others already on the map!</p>
+    <form id="submit-form" method="POST" action="/submit">
       <label for="country">Region</label>
       <select id="country" name="country" required autocomplete="country-name" onchange="onRegion(this.value)">
         <option value="" disabled selected>Select your region</option>
@@ -157,8 +177,21 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         <option>Wyoming</option>
       </select>
 
-      <button type="submit">Light it up</button>
+      <button type="submit" id="submit-btn">Light it up</button>
     </form>
+    </div>
+
+    <!-- success / duplicate panel (hidden until submission) -->
+    <div id="success-panel" class="success">
+      <span class="icon" id="success-icon">&#127881;</span>
+      <h2 id="success-title">You're on the map!</h2>
+      <p id="success-msg">Thanks for visiting.</p>
+      <div class="leaderboard" id="leaderboard" style="display:none">
+        <h3>&#127942; Current Leaders</h3>
+        <div id="lb-rows"></div>
+      </div>
+      <button onclick="resetForm()">Submit another</button>
+    </div>
   </div>
   <script>
     function onRegion(val) {
@@ -173,6 +206,89 @@ const char INDEX_HTML[] PROGMEM = R"rawliteral(
         hidden.value = 'non-us';
       }
     }
+
+    function loadCount() {
+      fetch('/data').then(function(r){ return r.json(); }).then(function(d) {
+        var counter = document.getElementById('counter');
+        var count = d.count;
+        if (count > 0) {
+          document.getElementById('sub-count').textContent = count;
+          counter.style.display = 'block';
+        }
+      }).catch(function(){});
+    }
+
+    document.getElementById('submit-form').addEventListener('submit', function(e) {
+      e.preventDefault();
+      var btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+      fetch('/submit', { method: 'POST', body: new FormData(this) })
+        .then(function(r) { return r.text(); })
+        .then(function(html) {
+          var isDupe = html.indexOf('already') !== -1;
+          document.getElementById('form-panel').style.display = 'none';
+          var panel = document.getElementById('success-panel');
+          if (isDupe) {
+            document.getElementById('success-icon').innerHTML = '&#128205;';
+            document.getElementById('success-title').textContent = "You're already on the map!";
+            document.getElementById('success-msg').textContent = "Looks like you've already signed this map. Thanks for visiting!";
+          }
+          panel.classList.add('show');
+          loadCount();
+          loadLeaderboard();
+        })
+        .catch(function() {
+          btn.disabled = false;
+          btn.textContent = 'Light it up';
+        });
+    });
+
+    function loadLeaderboard() {
+      fetch('/stats').then(function(r){ return r.json(); }).then(function(d) {
+        if (!d.top || d.top.length === 0) return;
+        var top = d.top;
+        var maxCount = top[0].count;
+        var medals = ['&#129945;','&#129946;','&#129947;'];
+        var html = '';
+        for (var i = 0; i < top.length; i++) {
+          var pct = maxCount > 0 ? Math.round(top[i].count / maxCount * 100) : 0;
+          var rank = i < 3 ? medals[i] : (i + 1) + '.';
+          html += '<div class="lb-row">'
+            + '<span class="lb-rank">' + rank + '</span>'
+            + '<span class="lb-name">' + top[i].name + '</span>'
+            + '<div class="lb-bar-wrap"><div class="lb-bar" style="width:0" data-w="' + pct + '%"></div></div>'
+            + '<span class="lb-count">' + top[i].count + '</span>'
+            + '</div>';
+        }
+        var lb = document.getElementById('leaderboard');
+        document.getElementById('lb-rows').innerHTML = html;
+        lb.style.display = 'block';
+        // Animate bars in after paint
+        setTimeout(function() {
+          var bars = lb.querySelectorAll('.lb-bar');
+          for (var j = 0; j < bars.length; j++) bars[j].style.width = bars[j].dataset.w;
+        }, 50);
+      }).catch(function(){});
+    }
+
+    function resetForm() {
+      document.getElementById('form-panel').style.display = '';
+      document.getElementById('success-panel').classList.remove('show');
+      document.getElementById('success-icon').innerHTML = '&#127881;';
+      document.getElementById('success-title').textContent = "You're on the map!";
+      document.getElementById('success-msg').textContent = "Thanks for visiting. Your home has been lit up.";
+      document.getElementById('leaderboard').style.display = 'none';
+      document.getElementById('lb-rows').innerHTML = '';
+      document.getElementById('submit-form').reset();
+      document.getElementById('state-select').disabled = true;
+      document.getElementById('state-val').value = 'non-us';
+      var btn = document.getElementById('submit-btn');
+      btn.disabled = false;
+      btn.textContent = 'Light it up';
+    }
+
+    loadCount();
   </script>
 </body>
 </html>
