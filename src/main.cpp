@@ -27,15 +27,16 @@ static Preferences prefs;
 #define BRIGHTNESS        200        // 0–255 (~25%)
 #define STATUS_LED_PIN    2         // Built-in blue LED on ESP32-WROOM-32E
 #define BLINK_INTERVAL_MS 500
-#define HEAT_TOP_PCT      15        // % of total submissions that pegs peak "hot" red
+#define HEAT_FLOOR        20        // minimum t value (0–255) for any state with ≥1 submission
+                                    // keeps first-submission states off pure blue
 #define BANNER_COLOR      CRGB::Red    // solid color for top and bottom banners
 
 // Access Point credentials
-static const char* AP_SSID     = "WhereTheWookiesAre";
+static const char* AP_SSID     = "MapExplorer";
 static const char* AP_PASSWORD = "";            // leave empty for open network
 
 // Maximum number of visitor submissions to store in memory
-static const uint16_t MAX_SUBMISSIONS = 500;
+static const uint16_t MAX_SUBMISSIONS = 10;
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── LED arrays ────────────────────────────────────────────────────────────────
@@ -56,56 +57,56 @@ struct State {
 
 static State states[] = {
     // { "StateName", ledFirst, ledLast, strip, idleColor, count }
-    { "Alabama",         0,  1, leds, CRGB::Red, 0 },
-    { "Alaska",          2,  3, leds, CRGB::Red, 0 },
-    { "Arizona",         4,  5, leds, CRGB::Red, 0 },
-    { "Arkansas",        6,  7, leds, CRGB::Red, 0 },
-    { "California",      8,  9, leds, CRGB::Red, 0 },
-    { "Colorado",       10, 11, leds, CRGB::Red, 0 },
-    { "Connecticut",    12, 13, leds, CRGB::Red, 0 },
-    { "Delaware",       14, 15, leds, CRGB::Red, 0 },
-    { "Florida",        16, 17, leds, CRGB::Red, 0 },
-    { "Georgia",        18, 19, leds, CRGB::Red, 0 },
-    { "Hawaii",         20, 21, leds, CRGB::Red, 0 },
-    { "Idaho",          22, 23, leds, CRGB::Red, 0 },
-    { "Illinois",       24, 25, leds, CRGB::Red, 0 },
-    { "Indiana",        26, 27, leds, CRGB::Red, 0 },
-    { "Iowa",           28, 29, leds, CRGB::Red, 0 },
-    { "Kansas",         30, 31, leds, CRGB::Red, 0 },
-    { "Kentucky",       32, 33, leds, CRGB::Red, 0 },
-    { "Louisiana",      34, 35, leds, CRGB::Red, 0 },
-    { "Maine",          36, 37, leds, CRGB::Red, 0 },
-    { "Maryland",       38, 39, leds, CRGB::Red, 0 },
-    { "Massachusetts",  40, 41, leds, CRGB::Red, 0 },
-    { "Michigan",       42, 43, leds, CRGB::Red, 0 },
-    { "Minnesota",      44, 45, leds, CRGB::Red, 0 },
-    { "Mississippi",    46, 47, leds, CRGB::Red, 0 },
-    { "Missouri",       48, 49, leds, CRGB::Red, 0 },
-    { "Montana",        50, 51, leds, CRGB::Red, 0 },
-    { "Nebraska",       52, 53, leds, CRGB::Red, 0 },
-    { "Nevada",         54, 55, leds, CRGB::Red, 0 },
-    { "New Hampshire",  56, 57, leds, CRGB::Red, 0 },
-    { "New Jersey",     58, 59, leds, CRGB::Red, 0 },
-    { "New Mexico",     60, 61, leds, CRGB::Red, 0 },
-    { "New York",       62, 63, leds, CRGB::Red, 0 },
-    { "North Carolina", 64, 65, leds, CRGB::Red, 0 },
-    { "North Dakota",   66, 67, leds, CRGB::Red, 0 },
-    { "Ohio",           68, 69, leds, CRGB::Red, 0 },
-    { "Oklahoma",       70, 71, leds, CRGB::Red, 0 },
-    { "Oregon",         72, 73, leds, CRGB::Red, 0 },
-    { "Pennsylvania",   74, 75, leds, CRGB::Red, 0 },
-    { "Rhode Island",   76, 77, leds, CRGB::Red, 0 },
-    { "South Carolina", 78, 79, leds, CRGB::Red, 0 },
-    { "South Dakota",   80, 81, leds, CRGB::Red, 0 },
-    { "Tennessee",      82, 83, leds, CRGB::Red, 0 },
-    { "Texas",          84, 85, leds, CRGB::Red, 0 },
-    { "Utah",           86, 87, leds, CRGB::Red, 0 },
-    { "Vermont",        88, 89, leds, CRGB::Red, 0 },
-    { "Virginia",       90, 91, leds, CRGB::Red, 0 },
-    { "Washington",     92, 93, leds, CRGB::Red, 0 },
-    { "West Virginia",  94, 95, leds, CRGB::Red, 0 },
-    { "Wisconsin",      96, 97, leds, CRGB::Red, 0 },
-    { "Wyoming",        98, 152, leds, CRGB::Red, 0 },
+    { "Alabama",          32,  34, leds, CRGB::Black, 0 },
+    { "Alaska",          146, 149, leds, CRGB::Black, 0 },
+    { "Arizona",         114, 117, leds, CRGB::Black, 0 },
+    { "Arkansas",         67,  69, leds, CRGB::Black, 0 },
+    { "California",      137, 145, leds, CRGB::Black, 0 },
+    { "Colorado",        106, 109, leds, CRGB::Black, 0 },
+    { "Connecticut",       8,   8, leds, CRGB::Black, 0 },
+    { "Delaware",          0,   0, leds, CRGB::Black, 0 },
+    { "Florida",          28,  31, leds, CRGB::Black, 0 },
+    { "Georgia",          25,  27, leds, CRGB::Black, 0 },
+    { "Hawaii",          150, 152, leds, CRGB::Black, 0 },
+    { "Idaho",           125, 129, leds, CRGB::Black, 0 },
+    { "Illinois",         52,  54, leds, CRGB::Black, 0 },
+    { "Indiana",          50,  51, leds, CRGB::Black, 0 },
+    { "Iowa",             62,  63, leds, CRGB::Black, 0 },
+    { "Kansas",           82,  84, leds, CRGB::Black, 0 },
+    { "Kentucky",         41,  43, leds, CRGB::Black, 0 },
+    { "Louisiana",        70,  71, leds, CRGB::Black, 0 },
+    { "Maine",             3,   4, leds, CRGB::Black, 0 },
+    { "Maryland",         13,  13, leds, CRGB::Black, 0 },
+    { "Massachusetts",     7,   7, leds, CRGB::Black, 0 },
+    { "Michigan",         46,  49, leds, CRGB::Black, 0 },
+    { "Minnesota",        58,  61, leds, CRGB::Black, 0 },
+    { "Mississippi",      35,  37, leds, CRGB::Black, 0 },
+    { "Missouri",         64,  66, leds, CRGB::Black, 0 },
+    { "Montana",          96, 101, leds, CRGB::Black, 0 },
+    { "Nebraska",         85,  88, leds, CRGB::Black, 0 },
+    { "Nevada",          121, 124, leds, CRGB::Black, 0 },
+    { "New Hampshire",     5,   5, leds, CRGB::Black, 0 },
+    { "New Jersey",       12,  12, leds, CRGB::Black, 0 },
+    { "New Mexico",      110, 113, leds, CRGB::Black, 0 },
+    { "New York",          9,  11, leds, CRGB::Black, 0 },
+    { "North Carolina",   20,  22, leds, CRGB::Black, 0 },
+    { "North Dakota",     93,  95, leds, CRGB::Black, 0 },
+    { "Ohio",             44,  45, leds, CRGB::Black, 0 },
+    { "Oklahoma",         79,  81, leds, CRGB::Black, 0 },
+    { "Oregon",          133, 136, leds, CRGB::Black, 0 },
+    { "Pennsylvania",     14,  16, leds, CRGB::Black, 0 },
+    { "Rhode Island",      1,   2, leds, CRGB::Black, 0 },
+    { "South Carolina",   23,  24, leds, CRGB::Black, 0 },
+    { "South Dakota",     89,  92, leds, CRGB::Black, 0 },
+    { "Tennessee",        38,  40, leds, CRGB::Black, 0 },
+    { "Texas",            72,  78, leds, CRGB::Black, 0 },
+    { "Utah",            118, 120, leds, CRGB::Black, 0 },
+    { "Vermont",           6,   6, leds, CRGB::Black, 0 },
+    { "Virginia",         18,  19, leds, CRGB::Black, 0 },
+    { "Washington",      130, 132, leds, CRGB::Black, 0 },
+    { "West Virginia",    17,  17, leds, CRGB::Black, 0 },
+    { "Wisconsin",        55,  57, leds, CRGB::Black, 0 },
+    { "Wyoming",         102, 105, leds, CRGB::Black, 0 },
 };
 
 static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
@@ -115,12 +116,12 @@ static const uint8_t NUM_STATES = sizeof(states) / sizeof(states[0]);
 // "country" form field value must match name exactly (case-insensitive).
 static State regions[] = {
     // { "RegionName", ledIndex, ledIndex, strip, idleColor, count }
-    { "Canada",    0, 0, regionLeds, CRGB::Red, 0 },
-    { "Mexico",    1, 1, regionLeds, CRGB::Red, 0 },
-    { "Europe",    2, 2, regionLeds, CRGB::Red, 0 },
-    { "Asia",      3, 3, regionLeds, CRGB::Red, 0 },
-    { "Africa",    4, 4, regionLeds, CRGB::Red, 0 },
-    { "Australia", 5, 5, regionLeds, CRGB::Red, 0 },
+    { "Canada",    0, 0, regionLeds, CRGB::Black, 0 },
+    { "Mexico",    1, 1, regionLeds, CRGB::Black, 0 },
+    { "Europe",    2, 2, regionLeds, CRGB::Black, 0 },
+    { "Asia",      3, 3, regionLeds, CRGB::Black, 0 },
+    { "Africa",    4, 4, regionLeds, CRGB::Black, 0 },
+    { "Australia", 5, 5, regionLeds, CRGB::Black, 0 },
 };
 
 static const uint8_t NUM_REGIONS = sizeof(regions) / sizeof(regions[0]);
@@ -164,13 +165,12 @@ void saveCount(char prefix, uint8_t idx, uint16_t count);
 CRGB heatmapColor(uint16_t count) {
     if (count == 0) return CRGB::Black; // caller substitutes idleColor
 
-    // Threshold = 15% of total submissions, minimum 1 to avoid divide-by-zero
-    uint16_t threshold = (uint16_t)(submissionCount * HEAT_TOP_PCT / 100);
-    if (threshold < 1) threshold = 1;
+    // Scale relative to the current leader so the top state is always full red,
+    // and all others sit proportionally below it on the gradient.
+    uint16_t maxCount = (leadingEntry && leadingEntry->count > 0) ? leadingEntry->count : count;
 
-    // Clamp to [1, threshold] then map to 0–255
-    uint16_t clamped = count > threshold ? threshold : count;
-    uint8_t  t       = (uint8_t)((uint32_t)(clamped - 1) * 255 / (threshold - 1 ? threshold - 1 : 1));
+    // Map to HEAT_FLOOR–255 so even a single submission shows noticeable color
+    uint8_t t = (uint8_t)(HEAT_FLOOR + (uint32_t)(count) * (255 - HEAT_FLOOR) / maxCount);
 
     // Four equal segments across five stops
     static const CRGB stops[5] = {
@@ -180,9 +180,11 @@ CRGB heatmapColor(uint16_t count) {
         CRGB(255, 255,   0),   // yellow
         CRGB(255,   0,   0),   // red
     };
+    // t=255 → seg=3, frac=252 via integer division — close but not quite stops[4].
+    // Treat t>=252 (top ~1%) as pure red so the leader always lands on solid red.
+    if (t >= 252) return stops[4];
     uint8_t seg  = t / 64;             // 0–3
-    uint8_t frac = (t % 64) * 4;      // 0–255 within segment
-    if (seg >= 4) return stops[4];
+    uint8_t frac = (uint8_t)((t % 64) * 4);  // 0–252 within segment
     return blend(stops[seg], stops[seg + 1], frac);
 }
 
@@ -228,24 +230,25 @@ int findRegion(const char* name) {
     return -1;
 }
 
-// Increment a state's count, persist it, refresh its LEDs, recompute the leader.
+// Increment a state's count, persist it, recompute the leader, then refresh its LEDs.
+// leadingEntry must be updated first so heatmapColor() scales against the correct max.
 void incrementState(int idx) {
     if (idx < 0 || idx >= NUM_STATES) return;
     states[idx].count++;
     saveCount('s', idx, states[idx].count);
+    leadingEntry = findLeadingEntry();   // update leader BEFORE computing color
     applyEntryColor(states[idx]);
     FastLED.show();
-    leadingEntry = findLeadingEntry();
 }
 
-// Increment a region's count, persist it, refresh its LED, recompute the leader.
+// Increment a region's count, persist it, recompute the leader, then refresh its LED.
 void incrementRegion(int idx) {
     if (idx < 0 || idx >= NUM_REGIONS) return;
     regions[idx].count++;
     saveCount('r', idx, regions[idx].count);
+    leadingEntry = findLeadingEntry();   // update leader BEFORE computing color
     applyEntryColor(regions[idx]);
     FastLED.show();
-    leadingEntry = findLeadingEntry();
 }
 
 // ── MAC address helpers ───────────────────────────────────────────────────────
@@ -577,12 +580,13 @@ void setup() {
 void loop() {
     dnsServer.processNextRequest();
 
-    // ── New submission: blink the entry's LEDs + onboard LED green 3 times ──
+    // ── New submission: blink the state LEDs green 3×, then chase the banners ──
     if (newSubmission) {
         newSubmission = false;
         State* entry = (State*)newSubmissionEntry;
         newSubmissionEntry = nullptr;
 
+        // Step 1 — blink the submitted state/region LEDs green 3×
         for (uint8_t i = 0; i < 3; i++) {
             digitalWrite(STATUS_LED_PIN, HIGH);
             if (entry) {
@@ -601,6 +605,36 @@ void loop() {
             delay(150);
         }
 
+        // Step 2 — chasing-comet animation on both banner strips
+        // A bright white head with a fading tail sweeps from end to end twice.
+        static const uint8_t CHASE_TRAIL  = 12;   // tail length in LEDs
+        static const uint8_t CHASE_PASSES = 2;    // how many full sweeps
+        static const uint8_t CHASE_DELAY  = 5;    // ms per frame (~200 fps cap)
+        const int chaseLen = max((int)NUM_LEDS_BANNER_TOP, (int)NUM_LEDS_BANNER_BOT)
+                             + CHASE_TRAIL;        // travel far enough to clear the strip
+
+        for (uint8_t pass = 0; pass < CHASE_PASSES; pass++) {
+            for (int pos = 0; pos < chaseLen; pos++) {
+                fill_solid(bannerTopLeds, NUM_LEDS_BANNER_TOP, CRGB::Black);
+                fill_solid(bannerBotLeds, NUM_LEDS_BANNER_BOT, CRGB::Black);
+
+                for (uint8_t t = 0; t < CHASE_TRAIL; t++) {
+                    int idx = pos - (int)t;
+                    // Brightness fades linearly from 255 at the head to 0 at the tail
+                    uint8_t brightness = (uint8_t)((uint16_t)(CHASE_TRAIL - t) * 255 / CHASE_TRAIL);
+                    CRGB dot(brightness, brightness, brightness);
+                    if (idx >= 0 && idx < NUM_LEDS_BANNER_TOP) bannerTopLeds[idx] = dot;
+                    if (idx >= 0 && idx < NUM_LEDS_BANNER_BOT) bannerBotLeds[idx] = dot;
+                }
+
+                FastLED.show();
+                delay(CHASE_DELAY);
+            }
+        }
+
+        // Step 3 — restore banners and repaint the map with updated heatmap colors
+        fill_solid(bannerTopLeds, NUM_LEDS_BANNER_TOP, BANNER_COLOR);
+        fill_solid(bannerBotLeds, NUM_LEDS_BANNER_BOT, BANNER_COLOR);
         refreshLEDs();
     }
 
